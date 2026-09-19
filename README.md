@@ -75,8 +75,8 @@ flowchart TD
 
 | Target | MAE (passengers) |
 |---|---|
-| Boarding | **5.76** |
-| Alighting | **5.37** |
+| Boarding | **6** |
+| Alighting | **5** |
 
 <details>
 <summary><b>The 13 input features</b></summary>
