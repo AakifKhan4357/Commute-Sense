@@ -1,0 +1,66 @@
+# ========================
+# Python & Virtual Environments
+# ========================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Distribution / Packaging
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testing & Jupyter
+.pytest_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints
+
+# ========================
+# Frontend (React / Vite / Node)
+# ========================
+node_modules/
+commute-sense-frontend/node_modules/
+commute-sense-frontend/dist/
+commute-sense-frontend/build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ========================
+# Environment Variables & Secrets
+# ========================
+.env
+.env.local
+.env.*.local
+*.pem
+
+# ========================
+# IDE & System Files
+# ========================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
