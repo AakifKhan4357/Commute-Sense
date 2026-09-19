@@ -131,23 +131,27 @@ def calculate_next_boardable_bus_api(incoming_buses_data_list: List[IncomingBusD
         )
         features_df = pd.DataFrame([features_dict])[feature_cols]
 
-        pred_board = max(0.0, float(model_boarding.predict(features_df)[0]))
-        pred_alight = max(0.0, float(model_alighting.predict(features_df)[0]))
+        pred_board = int(round(max(0.0, float(model_boarding.predict(features_df)[0]))))
+        pred_alight = int(round(max(0.0, float(model_alighting.predict(features_df)[0]))))
+        pred_alight = min(int(bus_data.current_load), pred_alight)
 
-        projected_occupancy = bus_data.current_load + pred_board - pred_alight
-        projected_occupancy = max(0.0, min(float(bus_data.capacity), projected_occupancy))
-        available_space = max(0.0, float(bus_data.capacity) - projected_occupancy)
+        capacity = int(bus_data.capacity)
+        current_load = int(bus_data.current_load)
 
-        is_boardable = available_space > 0.0
+        projected_occupancy = current_load + pred_board - pred_alight
+        projected_occupancy = max(0, min(capacity, projected_occupancy))
+        available_space = max(0, capacity - projected_occupancy)
+
+        is_boardable = available_space > 0
 
         results.append(
             {
                 "bus_id": bus_data.bus_id,
                 "arrival_time_sec": bus_data.eta_sec,
-                "predicted_boardings": round(pred_board, 1),
-                "predicted_alightings": round(pred_alight, 1),
-                "projected_occupancy": round(projected_occupancy, 1),
-                "available_space": round(available_space, 1),
+                "predicted_boardings": pred_board,
+                "predicted_alightings": pred_alight,
+                "projected_occupancy": projected_occupancy,
+                "available_space": available_space,
                 "is_boardable": is_boardable,
             }
         )
