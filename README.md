@@ -1,154 +1,143 @@
-CommuteSense: Predictive Bus Occupancy & Next Boardable Bus Detection
+<div align="center">
 
-Real-time transit passenger load forecasting and boardable bus arrival recommendations.
+# 🚌 CommuteSense
 
-📌 Problem & Overview
+### Know which bus has space, not just when it arrives.
 
-Traditional transit aggregators (e.g., Google Maps, Transit, Citymapper) estimate vehicle arrival times (ETA) but have no visibility into passenger occupancy. Commuters regularly wait for arriving buses only to find them overflowing and unable to board.
+Predicts how full each incoming bus will be when it reaches your stop, then tells you the next one you can actually board.
 
-CommuteSense solves this by predicting passenger turnover (boardings vs. alightings) before a vehicle reaches the curb. Using a dual-regressor machine learning model integrated with live road traversal metrics, CommuteSense informs riders not just when a bus will arrive, but which incoming bus actually has space to board.
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black)
+![Tailwind](https://img.shields.io/badge/Tailwind-CSS-06B6D4?logo=tailwindcss&logoColor=white)
+![XGBoost](https://img.shields.io/badge/XGBoost-2%20models-EC6B23)
+![Inference](https://img.shields.io/badge/inference-%3C15%20ms-brightgreen)
 
-🏗️ Architecture
+</div>
 
-[User Browser: GPS Geolocation & Terminus Destination]
-                          │
-                          ▼
-            ┌────────────────────────────┐
-            │   React 18 + Tailwind CSS  │
-            │     Frontend Dashboard     │
-            └────────────────────────────┘
-                          │
-         ┌────────────────┴────────────────┐
-         ▼                                 ▼
-┌──────────────────┐          ┌───────────────────────────┐
-│  OSRM Public API │          │      FastAPI Backend      │
-│ Driving Duration │          │   POST /predict-bus-space │
-│   and Distance   │          │       (Port 8000)         │
-└──────────────────┘          └───────────────────────────┘
-         │                                 │
-         └────────────────┬────────────────┘
-                          ▼
-        ┌────────────────────────────────────┐
-        │  13-Dimensional Feature Alignment  │
-        │  [line_id, stop_lat, OSRM, ...]   │
-        └────────────────────────────────────┘
-                          │
-              ┌───────────┴───────────┐
-              ▼                       ▼
-   ┌──────────────────────┐ ┌──────────────────────┐
-   │ XGBoost Boarding Reg │ │ XGBoost Alighting Reg│
-   │ (Predicts On-Board)  │ │ (Predicts Drop-Off)  │
-   └──────────────────────┘ └──────────────────────┘
-              │                       │
-              └───────────┬───────────┘
-                          ▼
-        ┌────────────────────────────────────┐
-        │     Dynamic Capacity Logic:        │
-        │   Occ = Load + Pred_On - Pred_Off  │
-        │      Space = Capacity - Occ        │
-        │    Is_Boardable = (Space > 0)      │
-        └────────────────────────────────────┘
-                          │
-                          ▼
-        [Live Sorted Projections & Best Card]
+---
 
+## The problem
 
-🚀 Key Features
+Transit apps such as Google Maps, Transit and Citymapper show when a bus will arrive. They do not show how full it is. You wait ten minutes, the bus pulls in packed, and you cannot get on.
 
-Dual XGBoost Inference: Separate gradient-boosted regressors predict boarding surges and alighting drops per stop in under $15\text{ ms}$.
+CommuteSense predicts the passenger turnover at each stop before the bus gets there: how many people will get on and how many will get off. From that it works out how much space is left and which arriving bus you can board.
 
-Dynamic Capacity Scoring: Calculates net remaining space ($Load_{\text{current}} + \hat{y}_{\text{boarding}} - \hat{y}_{\text{alighting}}$) to flag boardable vehicles.
+## How it works
 
-Routing-Aware Covariates: Integrates Open Source Routing Machine (OSRM) distance and traversal duration to track passenger discharge along corridors.
+1. **You give it two points.** The browser reads your GPS location and you pick a destination.
+2. **It gets the road data.** The OSRM API returns driving duration and distance between the stop and the destination.
+3. **It gets the incoming buses.** Each bus comes with its line, position on the route, current passenger count, seat count and ETA.
+4. **Two models predict the turnover.** One predicts how many passengers board at the stop, the other how many get off. Inputs include day of week, time, location, route and the OSRM values.
+5. **It scores each bus.**
 
-Smart UI Dashboard: Live GPS tracking (navigator.geolocation) with a "Next Boardable Bus" recommendation card and capacity matrix.
+```text
+projected_occupancy = current_load + predicted_boarding - predicted_alighting
+free_space          = vehicle_seats - projected_occupancy
+is_boardable        = free_space > 0
+```
 
-📊 Model Specifications
+6. **It sorts by arrival time.** The first bus with `is_boardable = true` becomes the **Next Boardable Bus** card.
 
-Algorithm: Dual Extreme Gradient Boosting Regressors (xgboost.XGBRegressor)
+## Architecture
 
-Tree Method: hist (optimized split evaluation)
+```mermaid
+flowchart TD
+    A["Browser<br/>GPS location + destination"] --> B["React 18 + Tailwind dashboard"]
+    B --> C["OSRM public API<br/>driving duration + distance"]
+    B --> D["FastAPI backend<br/>POST /predict-bus-space"]
+    C --> E["13-feature input vector"]
+    D --> E
+    E --> F["XGBoost<br/>boarding regressor"]
+    E --> G["XGBoost<br/>alighting regressor"]
+    F --> H["Capacity logic<br/>load + boarding - alighting"]
+    G --> H
+    H --> I["Buses sorted by ETA<br/>Next Boardable Bus card"]
+```
 
-Hyperparameters: $n_{\text{estimators}} = 300$, $\eta = 0.05$, $\text{max\_depth} = 6$, $\text{subsample} = 0.8$, $\text{colsample\_bytree} = 0.8$
+## Features
 
-Quantitative Metrics (Test Split: 20%):
+| Feature | What it does |
+|---|---|
+| **Two XGBoost models** | Separate regressors for boardings and alightings, each returning a prediction in under 15 ms |
+| **Space scoring** | Computes free seats at arrival and flags each bus as boardable or not |
+| **Route-aware inputs** | Uses OSRM distance and travel time so the model knows how far riders are likely to travel |
+| **Live dashboard** | GPS tracking through `navigator.geolocation`, a Next Boardable Bus card and a capacity table for all incoming buses |
 
-Formula: 
+## Model
 
-$$\text{MAE} = \frac{1}{n}\sum_{i=1}^{n} \vert{}y_i - \hat{y}_i\vert{}$$
+| | |
+|---|---|
+| **Algorithm** | Two `xgboost.XGBRegressor` models |
+| **Tree method** | `hist` |
+| **Hyperparameters** | `n_estimators=300`, `learning_rate=0.05`, `max_depth=6`, `subsample=0.8`, `colsample_bytree=0.8` |
+| **Evaluation** | 20% held-out test split |
 
-Boarding MAE: $5.76\text{ passengers}$
+| Target | MAE (passengers) |
+|---|---|
+| Boarding | **5.76** |
+| Alighting | **5.37** |
 
-Alighting MAE: $5.37\text{ passengers}$
+<details>
+<summary><b>The 13 input features</b></summary>
 
-13 Feature Dimensions: line_id, stop_id, stop_position, day_of_week, hour, minute, stop_lat, stop_lon, dest_lat, dest_lon, osrm_traversal_duration_sec, osrm_distance_m, vehicle_seats.
+| # | Feature | Group |
+|---|---|---|
+| 1 | `line_id` | Route |
+| 2 | `stop_id` | Route |
+| 3 | `stop_position` | Route |
+| 4 | `day_of_week` | Time |
+| 5 | `hour` | Time |
+| 6 | `minute` | Time |
+| 7 | `stop_lat` | Location |
+| 8 | `stop_lon` | Location |
+| 9 | `dest_lat` | Location |
+| 10 | `dest_lon` | Location |
+| 11 | `osrm_traversal_duration_sec` | Road data |
+| 12 | `osrm_distance_m` | Road data |
+| 13 | `vehicle_seats` | Vehicle |
 
-📁 Repository Structure
+</details>
 
-CommuteSense/
-├── commute-sense-frontend/    # React 18 + Tailwind CSS client interface
-│   ├── src/
-│   ├── package.json
-│   └── vite.config.js
-├── main.py                    # FastAPI service & model scoring pipeline
-├── model_boarding.json        # Pretrained XGBoost weights (boardings)
-├── model_alighting.json       # Pretrained XGBoost weights (alightings)
-├── requirements.txt           # Python dependencies
-├── .gitignore
-└── README.md
+## Quick start
 
+**Requirements:** Python 3.10+, Node.js 18+ and npm.
 
-🛠️ Setup & Installation
+### 1. Backend
 
-Prerequisites
-
-Python 3.10+
-
-Node.js 18+ and npm
-
-1. Backend Setup
-
-# Clone the repository
-git clone https://github.com/<your-org-or-username>/CommuteSense.git
+```bash
+git clone https://github.com/<your-username>/CommuteSense.git
 cd CommuteSense
 
-# Create and activate virtual environment
 python -m venv venv
-# On Linux/macOS:
-source venv/bin/activate
-# On Windows:
-venv\Scripts\activate
+source venv/bin/activate        # Windows: venv\Scripts\activate
 
-# Install dependencies
 pip install -r requirements.txt
-
-# Start the FastAPI server
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
 
+The API runs at `http://localhost:8000`. Interactive docs are at `http://localhost:8000/docs`.
 
-The API will be operational at http://localhost:8000. Interactive OpenAPI documentation is accessible at http://localhost:8000/docs.
+### 2. Frontend
 
-2. Frontend Setup
-
+```bash
 cd commute-sense-frontend
-
-# Install dependencies
 npm install
-
-# Run the development server
 npm run dev
+```
 
+Open `http://localhost:5173`.
 
-Open http://localhost:5173 in your browser to view the interface.
+## API
 
-🔌 API Reference
+### `POST /predict-bus-space`
 
-POST /predict-bus-space
+Takes your stop, your destination and a list of incoming buses. Returns a boardability prediction for each bus.
 
-Accepts incoming bus batch telemetry and returns boardability predictions.
+<details open>
+<summary><b>Request</b></summary>
 
-Sample Request Body:
-
+```json
 {
   "stop_lat": 17.3850,
   "stop_lon": 78.4867,
@@ -166,10 +155,14 @@ Sample Request Body:
     }
   ]
 }
+```
 
+</details>
 
-Sample Response:
+<details open>
+<summary><b>Response</b></summary>
 
+```json
 {
   "status": "success",
   "predictions": [
@@ -185,20 +178,39 @@ Sample Response:
     }
   ]
 }
+```
 
+Worked example: `54 + 2.8 - 10.5 = 46.3` passengers on arrival, so `60 - 46.3 = 13.7` free seats.
 
-🗺️ Roadmap
+</details>
 
-[x] Dual XGBoost offline training & sequential delta engineering
+## Project structure
 
-[x] FastAPI inference backend with schema validation
+```text
+CommuteSense/
+├── commute-sense-frontend/    # React 18 + Tailwind CSS client
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.js
+├── main.py                    # FastAPI service and scoring pipeline
+├── model_boarding.json        # Trained XGBoost weights: boardings
+├── model_alighting.json       # Trained XGBoost weights: alightings
+├── requirements.txt
+└── README.md
+```
 
-[x] React client dashboard with OSRM telemetry
+## Known limitations
 
-[ ] Direct GTFS-RT streaming ingestion (Vehicle Positions & Trip Updates)
+- An average error of about 5 to 6 passengers is large next to a 60-seat bus. Buses that finish close to full are the least reliable calls.
+- The public OSRM server is meant for demos and rate-limits heavy use. A self-hosted OSRM instance is needed for real deployment.
+- Bus telemetry (current load, ETA) is passed in the request body. A live feed is not connected yet, see the roadmap.
 
-[ ] Benchmarking against Temporal Fusion Transformers (TFT) and BiLSTMs
+## Roadmap
 
-[ ] Weather API covariate integration (precipitation/temperature impact)
-
-[ ] Dockerized deployment on Google Cloud Run
+- [x] Offline training of both XGBoost models with stop-to-stop delta features
+- [x] FastAPI inference backend with request validation
+- [x] React dashboard with OSRM data
+- [ ] Live bus feed through GTFS-Realtime (vehicle positions and trip updates)
+- [ ] Benchmark against Temporal Fusion Transformers and BiLSTMs
+- [ ] Weather inputs (rain and temperature)
+- [ ] Docker image and deployment on Google Cloud Run
