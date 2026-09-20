@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Bus,
   MapPin,
@@ -6,7 +6,6 @@ import {
   Users,
   CheckCircle2,
   XCircle,
-  Navigation,
   RefreshCw,
   AlertTriangle,
 } from "lucide-react";
@@ -15,92 +14,35 @@ import {
 const API_BASE_URL = "http://127.0.0.1:8000";
 
 export default function App() {
-  // Origin & Destination state (defaulted to close coordinates so OSRM routing succeeds)
-  const [origin, setOrigin] = useState({
-    lat: "17.3850",
-    lon: "78.4867",
-    name: "Current Location",
-  });
-  const [dest, setDest] = useState({
-    lat: "17.4401",
-    lon: "78.3489",
-    name: "Destination",
-  });
+  // Origin & Destination names mapped directly to the CSV
+  const [originStopName, setOriginStopName] = useState("Secunderabad Station");
+  const [destStopName, setDestStopName] = useState("Hitec City");
 
   // UI state
-  const [loadingLocation, setLoadingLocation] = useState(false);
   const [loadingPrediction, setLoadingPrediction] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [results, setResults] = useState(null);
   const [nextBus, setNextBus] = useState(null);
   const [routeStats, setRouteStats] = useState(null);
 
-  useEffect(() => {
-    handleUseCurrentLocation();
-  }, []);
-
-  const handleUseCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      setErrorMsg("Geolocation is not supported by your browser.");
-      return;
-    }
-    setLoadingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const userLat = position.coords.latitude.toFixed(4);
-        const userLon = position.coords.longitude.toFixed(4);
-        setOrigin({
-          lat: userLat,
-          lon: userLon,
-          name: "Current GPS Location",
-        });
-        // Set nearby default destination (roughly 5-6 km away)
-        setDest({
-          lat: (parseFloat(userLat) + 0.045).toFixed(4),
-          lon: (parseFloat(userLon) + 0.035).toFixed(4),
-          name: "Downstream Stop",
-        });
-        setLoadingLocation(false);
-      },
-      (err) => {
-        setErrorMsg("Unable to retrieve GPS: " + err.message);
-        setLoadingLocation(false);
-      },
-      { timeout: 8000 }
-    );
-  };
-
-  // Query public OSRM API for travel time and distance
-  const fetchOsrmMetrics = async (oLat, oLon, dLat, dLon) => {
-    const url = `https://router.project-osrm.org/route/v1/driving/${oLon},${oLat};${dLon},${dLat}?overview=false`;
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-      if (data.routes && data.routes.length > 0) {
-        return {
-          durationSec: data.routes[0].duration,
-          distanceM: data.routes[0].distance,
-        };
-      }
-    } catch {
-      // Fallback estimate if OSRM is unreachable
-    }
+  // Optional traversal metrics (approximate fallback or from external OSRM)
+  const fetchOsrmMetrics = async () => {
     return { durationSec: 900.0, distanceM: 6500.0 };
   };
 
   const runPrediction = async (e) => {
     e?.preventDefault();
+    if (!originStopName.trim() || !destStopName.trim()) {
+      setErrorMsg("Please provide both origin and destination stop names.");
+      return;
+    }
+
     setLoadingPrediction(true);
     setErrorMsg("");
 
     try {
-      const oLat = parseFloat(origin.lat);
-      const oLon = parseFloat(origin.lon);
-      const dLat = parseFloat(dest.lat);
-      const dLon = parseFloat(dest.lon);
-
-      // 1. Fetch traversal metrics from OSRM
-      const osrm = await fetchOsrmMetrics(oLat, oLon, dLat, dLon);
+      // 1. Fetch traversal metrics
+      const osrm = await fetchOsrmMetrics();
       setRouteStats(osrm);
 
       // 2. Prepare dynamic time parameters
@@ -109,7 +51,7 @@ export default function App() {
       const hour = now.getHours();
       const minute = now.getMinutes();
 
-      // 3. Assemble simulated incoming buses matching Pydantic schema
+      // 3. Assemble simulated incoming buses sending stop_name and dest_name
       const simulatedIncomingBuses = [
         {
           bus_id: "BUS-Line-73A",
@@ -123,10 +65,8 @@ export default function App() {
             day_of_week: dayOfWeek,
             hour: hour,
             minute: minute,
-            stop_lat: oLat,
-            stop_lon: oLon,
-            dest_lat: dLat,
-            dest_lon: dLon,
+            stop_name: originStopName.trim(),
+            dest_name: destStopName.trim(),
             osrm_traversal_duration_sec: osrm.durationSec,
             osrm_distance_m: osrm.distanceM,
             vehicle_seats: 60,
@@ -144,10 +84,8 @@ export default function App() {
             day_of_week: dayOfWeek,
             hour: hour,
             minute: minute,
-            stop_lat: oLat,
-            stop_lon: oLon,
-            dest_lat: dLat,
-            dest_lon: dLon,
+            stop_name: originStopName.trim(),
+            dest_name: destStopName.trim(),
             osrm_traversal_duration_sec: osrm.durationSec,
             osrm_distance_m: osrm.distanceM,
             vehicle_seats: 60,
@@ -165,10 +103,8 @@ export default function App() {
             day_of_week: dayOfWeek,
             hour: hour,
             minute: minute,
-            stop_lat: oLat,
-            stop_lon: oLon,
-            dest_lat: dLat,
-            dest_lon: dLon,
+            stop_name: originStopName.trim(),
+            dest_name: destStopName.trim(),
             osrm_traversal_duration_sec: osrm.durationSec,
             osrm_distance_m: osrm.distanceM,
             vehicle_seats: 75,
@@ -184,7 +120,10 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`Server returned HTTP ${response.status}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(
+          errorData.detail || `Server returned HTTP ${response.status}`
+        );
       }
 
       const data = await response.json();
@@ -249,62 +188,38 @@ export default function App() {
           <div className="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5" /> Current Stop / Origin
+                <MapPin className="w-3.5 h-3.5" /> Current Stop / Origin Name
               </span>
-              <button
-                onClick={handleUseCurrentLocation}
-                disabled={loadingLocation}
-                className="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors"
-              >
-                <Navigation className="w-3 h-3" />
-                {loadingLocation ? "Locating..." : "Use GPS"}
-              </button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs text-slate-400">Latitude</label>
-                <input
-                  type="text"
-                  value={origin.lat}
-                  onChange={(e) => setOrigin({ ...origin, lat: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400">Longitude</label>
-                <input
-                  type="text"
-                  value={origin.lon}
-                  onChange={(e) => setOrigin({ ...origin, lon: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Stop Name (Matches CSV)
+              </label>
+              <input
+                type="text"
+                value={originStopName}
+                onChange={(e) => setOriginStopName(e.target.value)}
+                placeholder="e.g. Secunderabad Station"
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
             </div>
           </div>
 
           <div className="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-3">
             <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5" /> Destination Coordinates
+              <MapPin className="w-3.5 h-3.5" /> Destination Stop Name
             </span>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs text-slate-400">Latitude</label>
-                <input
-                  type="text"
-                  value={dest.lat}
-                  onChange={(e) => setDest({ ...dest, lat: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-400">Longitude</label>
-                <input
-                  type="text"
-                  value={dest.lon}
-                  onChange={(e) => setDest({ ...dest, lon: e.target.value })}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                />
-              </div>
+            <div>
+              <label className="text-xs text-slate-400 block mb-1">
+                Destination Name (Matches CSV)
+              </label>
+              <input
+                type="text"
+                value={destStopName}
+                onChange={(e) => setDestStopName(e.target.value)}
+                placeholder="e.g. Hitec City"
+                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
             </div>
           </div>
         </div>
@@ -371,7 +286,8 @@ export default function App() {
           <div className="p-5 bg-amber-950/30 border border-amber-800/40 rounded-2xl flex items-center gap-3">
             <XCircle className="w-5 h-5 text-amber-400 flex-shrink-0" />
             <div className="text-sm text-amber-200">
-              No boardable buses found. All incoming vehicles are predicted to be at capacity.
+              No boardable buses found. All incoming vehicles are predicted to
+              be at capacity.
             </div>
           </div>
         ) : null}
@@ -405,7 +321,9 @@ export default function App() {
                     <tr
                       key={bus.bus_id}
                       className={`hover:bg-slate-700/20 transition-colors ${
-                        nextBus?.bus_id === bus.bus_id ? "bg-emerald-950/10" : ""
+                        nextBus?.bus_id === bus.bus_id
+                          ? "bg-emerald-950/10"
+                          : ""
                       }`}
                     >
                       <td className="px-4 py-3 font-semibold text-slate-100 flex items-center gap-2">
