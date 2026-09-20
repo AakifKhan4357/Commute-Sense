@@ -1,10 +1,10 @@
 from contextlib import asynccontextmanager
-from typing import List
+from typing import List, Optional
 import os
 import pandas as pd
 import uvicorn
 import xgboost as xgb
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -27,6 +27,20 @@ try:
         print("Warning: Model files not found. Ensure .json or .pkl model files are in the working directory.")
 except Exception as e:
     print(f"Error loading models: {e}")
+
+# Load stops coordinate mapping from CSV
+stops_df = pd.DataFrame(columns=["place_name", "latitude", "longitude"])
+for filename in ["stops.csv", "bus_stops.csv"]:
+    if os.path.exists(filename):
+        stops_df = pd.read_csv(filename)
+        break
+else:
+    csv_files = [f for f in os.listdir(".") if f.endswith(".csv")]
+    if csv_files:
+        stops_df = pd.read_csv(csv_files[0])
+
+stops_df["place_name_clean"] = stops_df["place_name"].astype(str).str.strip().str.lower()
+stops_map = stops_df.drop_duplicates("place_name_clean").set_index("place_name_clean")[["latitude", "longitude"]].to_dict(orient="index")
 
 
 # Optional ngrok lifecycle (will not crash if token is missing or local dev is used)
@@ -72,10 +86,12 @@ class IncomingBusFeatures(BaseModel):
     day_of_week: int
     hour: int
     minute: int
-    stop_lat: float
-    stop_lon: float
-    dest_lat: float
-    dest_lon: float
+    stop_name: Optional[str] = None
+    dest_name: Optional[str] = None
+    stop_lat: Optional[float] = None
+    stop_lon: Optional[float] = None
+    dest_lat: Optional[float] = None
+    dest_lon: Optional[float] = None
     osrm_traversal_duration_sec: float
     osrm_distance_m: float
     vehicle_seats: int
@@ -129,6 +145,25 @@ def calculate_next_boardable_bus_api(incoming_buses_data_list: List[IncomingBusD
             if hasattr(bus_data.features, "model_dump")
             else bus_data.features.dict()
         )
+
+        # Resolve stop coordinates from place name if missing
+        if features_dict.get("stop_name"):
+            key = str(features_dict["stop_name"]).strip().lower()
+            if key in stops_map:
+                features_dict["stop_lat"] = stops_map[key]["latitude"]
+                features_dict["stop_lon"] = stops_map[key]["longitude"]
+            else:
+                raise HTTPException(status_code=404, detail=f"Stop name '{features_dict['stop_name']}' not found in stops CSV.")
+
+        # Resolve destination coordinates from place name if missing
+        if features_dict.get("dest_name"):
+            key = str(features_dict["dest_name"]).strip().lower()
+            if key in stops_map:
+                features_dict["dest_lat"] = stops_map[key]["latitude"]
+                features_dict["dest_lon"] = stops_map[key]["longitude"]
+            else:
+                raise HTTPException(status_code=404, detail=f"Destination name '{features_dict['dest_name']}' not found in stops CSV.")
+
         features_df = pd.DataFrame([features_dict])[feature_cols]
 
         pred_board = int(round(max(0.0, float(model_boarding.predict(features_df)[0]))))
