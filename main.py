@@ -205,6 +205,22 @@ def root():
     }
 
 
+@app.get("/stops", response_model=List[str])
+def get_stops():
+    csv_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "citydata.csv"))
+    if os.path.exists(csv_path):
+        df = pd.read_csv(csv_path)
+        if "place_name" in df.columns:
+            places = df["place_name"].dropna().astype(str).str.strip().unique().tolist()
+            return sorted(places)
+
+    if not stops_df.empty and "place_name" in stops_df.columns:
+        places = stops_df["place_name"].dropna().astype(str).str.strip().unique().tolist()
+        return sorted(places)
+
+    return []
+
+
 @app.post("/predict-bus-space", response_model=NextBoardableBusResponse)
 def predict_bus_space(incoming_buses: List[IncomingBusData]):
     all_bus_projections, next_boardable_bus = calculate_next_boardable_bus_api(incoming_buses)

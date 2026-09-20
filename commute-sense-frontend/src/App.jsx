@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Bus,
   MapPin,
@@ -13,10 +13,79 @@ import {
 // Points to local FastAPI backend
 const API_BASE_URL = "http://127.0.0.1:8000";
 
+// Reusable Autocomplete Input Component
+function AutocompleteInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  suggestions,
+  accentColor = "indigo",
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filtered = value.trim()
+    ? suggestions
+        .filter((item) => item.toLowerCase().includes(value.toLowerCase()))
+        .slice(0, 8)
+    : [];
+
+  return (
+    <div className="relative" ref={containerRef}>
+      <label className="text-xs text-slate-400 block mb-1">{label}</label>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setIsOpen(true);
+        }}
+        onFocus={() => setIsOpen(true)}
+        placeholder={placeholder}
+        className={`w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+          accentColor === "emerald"
+            ? "focus:border-emerald-500"
+            : "focus:border-indigo-500"
+        }`}
+      />
+
+      {isOpen && filtered.length > 0 && (
+        <ul className="absolute z-30 left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-lg shadow-xl max-h-48 overflow-y-auto divide-y divide-slate-800">
+          {filtered.map((item, idx) => (
+            <li
+              key={idx}
+              onMouseDown={() => {
+                onChange(item);
+                setIsOpen(false);
+              }}
+              className="px-3 py-2 text-sm text-slate-200 hover:bg-slate-800 cursor-pointer flex items-center gap-2"
+            >
+              <MapPin className="w-3.5 h-3.5 text-slate-500" />
+              <span>{item}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
-  // Origin & Destination names mapped directly to the CSV
   const [originStopName, setOriginStopName] = useState("Secunderabad Station");
   const [destStopName, setDestStopName] = useState("Hitec City");
+  const [availableStops, setAvailableStops] = useState([]);
 
   // UI state
   const [loadingPrediction, setLoadingPrediction] = useState(false);
@@ -25,7 +94,22 @@ export default function App() {
   const [nextBus, setNextBus] = useState(null);
   const [routeStats, setRouteStats] = useState(null);
 
-  // Optional traversal metrics (approximate fallback or from external OSRM)
+  // Fetch unique place names on mount
+  useEffect(() => {
+    const fetchStops = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/stops`);
+        if (res.ok) {
+          const stops = await res.json();
+          setAvailableStops(stops);
+        }
+      } catch (err) {
+        console.warn("Could not preload stop names from backend:", err.message);
+      }
+    };
+    fetchStops();
+  }, []);
+
   const fetchOsrmMetrics = async () => {
     return { durationSec: 900.0, distanceM: 6500.0 };
   };
@@ -41,23 +125,20 @@ export default function App() {
     setErrorMsg("");
 
     try {
-      // 1. Fetch traversal metrics
       const osrm = await fetchOsrmMetrics();
       setRouteStats(osrm);
 
-      // 2. Prepare dynamic time parameters
       const now = new Date();
-      const dayOfWeek = (now.getDay() + 6) % 7; // Monday = 0, Sunday = 6
+      const dayOfWeek = (now.getDay() + 6) % 7;
       const hour = now.getHours();
       const minute = now.getMinutes();
 
-      // 3. Assemble simulated incoming buses sending stop_name and dest_name
       const simulatedIncomingBuses = [
         {
           bus_id: "BUS-Line-73A",
           eta_sec: 180,
           capacity: 60,
-          current_load: 54, // Crowded bus
+          current_load: 54,
           features: {
             line_id: 73,
             stop_id: 101,
@@ -76,7 +157,7 @@ export default function App() {
           bus_id: "BUS-Line-73B",
           eta_sec: 420,
           capacity: 60,
-          current_load: 32, // Moderately occupied
+          current_load: 32,
           features: {
             line_id: 73,
             stop_id: 101,
@@ -95,7 +176,7 @@ export default function App() {
           bus_id: "BUS-Line-105",
           eta_sec: 780,
           capacity: 75,
-          current_load: 20, // High capacity available
+          current_load: 20,
           features: {
             line_id: 105,
             stop_id: 101,
@@ -112,7 +193,6 @@ export default function App() {
         },
       ];
 
-      // 4. Send request to FastAPI backend
       const response = await fetch(`${API_BASE_URL}/predict-bus-space`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -183,7 +263,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Origin / Destination Controls */}
+        {/* Origin / Destination Controls with Autocomplete */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-3">
             <div className="flex justify-between items-center">
@@ -191,36 +271,28 @@ export default function App() {
                 <MapPin className="w-3.5 h-3.5" /> Current Stop / Origin Name
               </span>
             </div>
-            <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Stop Name (Matches CSV)
-              </label>
-              <input
-                type="text"
-                value={originStopName}
-                onChange={(e) => setOriginStopName(e.target.value)}
-                placeholder="e.g. Secunderabad Station"
-                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
+            <AutocompleteInput
+              label="Stop Name (Matches CSV)"
+              value={originStopName}
+              onChange={setOriginStopName}
+              placeholder="e.g. Secunderabad Station"
+              suggestions={availableStops}
+              accentColor="indigo"
+            />
           </div>
 
           <div className="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-3">
             <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
               <MapPin className="w-3.5 h-3.5" /> Destination Stop Name
             </span>
-            <div>
-              <label className="text-xs text-slate-400 block mb-1">
-                Destination Name (Matches CSV)
-              </label>
-              <input
-                type="text"
-                value={destStopName}
-                onChange={(e) => setDestStopName(e.target.value)}
-                placeholder="e.g. Hitec City"
-                className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-              />
-            </div>
+            <AutocompleteInput
+              label="Destination Name (Matches CSV)"
+              value={destStopName}
+              onChange={setDestStopName}
+              placeholder="e.g. Hitec City"
+              suggestions={availableStops}
+              accentColor="emerald"
+            />
           </div>
         </div>
 
